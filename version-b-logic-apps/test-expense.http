@@ -1,0 +1,84 @@
+### Version B has no HTTP "submit" endpoint by default — the trigger is a Service Bus
+### queue. Easiest way to drive these 6 scenarios for the demo/screenshots:
+###   Portal -> Service Bus namespace -> Queue "expense-requests" -> Service Bus Explorer -> Send message
+### Paste each JSON body below as the message content (Content Type: application/json).
+### Keeping them here as an .http file so you have one canonical source of test data
+### for both versions.
+
+### Scenario 1: Valid expense under $100 -> Auto-approved
+{
+  "employee_name": "Alice Tremblay",
+  "employee_email": "alice@example.com",
+  "amount": 45.00,
+  "category": "meals",
+  "description": "Team lunch",
+  "manager_email": "manager@example.com"
+}
+
+### Scenario 2: Valid expense >= $100, manager approves
+### (send this, then use Service Bus Explorer to send a message to the
+### "manager-decisions" subscription's parent topic with property outcome=approved
+### and a body correlating to this expense before the poll loop times out)
+{
+  "employee_name": "Bob Nguyen",
+  "employee_email": "bob@example.com",
+  "amount": 350.00,
+  "category": "equipment",
+  "description": "Replacement laptop charger",
+  "manager_email": "manager@example.com"
+}
+
+### Scenario 3: Valid expense >= $100, manager rejects
+{
+  "employee_name": "Chen Wei",
+  "employee_email": "chen@example.com",
+  "amount": 899.99,
+  "category": "software",
+  "description": "Annual IDE license",
+  "manager_email": "manager@example.com"
+}
+
+### Scenario 4: Valid expense >= $100, no manager response -> Escalated
+### Send this and simply wait out the poll-loop timeout without sending a decision.
+{
+  "employee_name": "Dana Okafor",
+  "employee_email": "dana@example.com",
+  "amount": 500.00,
+  "category": "travel",
+  "description": "Conference airfare",
+  "manager_email": "manager@example.com"
+}
+
+### Scenario 5: Missing required fields -> Validation error
+{
+  "employee_name": "Eve Martin",
+  "amount": 120.00,
+  "category": "travel",
+  "description": "Missing email fields"
+}
+
+### Scenario 6: Invalid category -> Validation error
+{
+  "employee_name": "Frank Lee",
+  "employee_email": "frank@example.com",
+  "amount": 60.00,
+  "category": "entertainment",
+  "description": "Concert tickets",
+  "manager_email": "manager@example.com"
+}
+
+
+### --- Direct HTTP test of the validation Function in isolation (fast, no Service Bus needed) ---
+@funcUrl = https://cst8917-expense-validate-faiza.azurewebsites.net/api/validate?code=YOUR_FUNCTION_KEY
+
+POST {{funcUrl}}
+Content-Type: application/json
+
+{
+  "employee_name": "Test User",
+  "employee_email": "test@example.com",
+  "amount": 250,
+  "category": "supplies",
+  "description": "Office supplies",
+  "manager_email": "mgr@example.com"
+}

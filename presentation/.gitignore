@@ -1,0 +1,6 @@
+.venv/
+azurite-data/
+__pycache__/
+local.settings.json
+*.pyc
+node_modules/

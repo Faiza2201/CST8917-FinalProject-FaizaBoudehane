@@ -1,0 +1,194 @@
+{
+  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "$connections": { "defaultValue": {}, "type": "Object" }
+  },
+  "triggers": {
+    "When_a_message_is_received_in_a_queue": {
+      "type": "ApiConnection",
+      "recurrence": { "frequency": "Second", "interval": 10 },
+      "inputs": {
+        "host": { "connection": { "name": "@parameters('$connections')['servicebus']['connectionId']" } },
+        "method": "get",
+        "path": "/@{encodeURIComponent('expense-requests')}/messages/head",
+        "queries": { "queueType": "Main" }
+      }
+    }
+  },
+  "actions": {
+    "Parse_expense": {
+      "type": "ParseJson",
+      "inputs": {
+        "content": "@base64ToString(triggerBody()?['ContentData'])",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "employee_name": { "type": "string" },
+            "employee_email": { "type": "string" },
+            "amount": { "type": "number" },
+            "category": { "type": "string" },
+            "description": { "type": "string" },
+            "manager_email": { "type": "string" }
+          }
+        }
+      },
+      "runAfter": {}
+    },
+
+    "Call_validation_function": {
+      "type": "Http",
+      "inputs": {
+        "method": "POST",
+        "uri": "https://<your-validation-func>.azurewebsites.net/api/validate?code=<function-key>",
+        "body": "@body('Parse_expense')"
+      },
+      "runAfter": { "Parse_expense": ["Succeeded"] }
+    },
+
+    "Condition_is_valid": {
+      "type": "If",
+      "expression": {
+        "and": [
+          { "equals": ["@body('Call_validation_function')?['valid']", true] }
+        ]
+      },
+      "actions": {
+        "Condition_requires_approval": {
+          "type": "If",
+          "expression": {
+            "and": [
+              { "equals": ["@body('Call_validation_function')?['requiresApproval']", true] }
+            ]
+          },
+          "actions": {
+            "Send_to_pending_topic": {
+              "type": "ApiConnection",
+              "inputs": {
+                "host": { "connection": { "name": "@parameters('$connections')['servicebus']['connectionId']" } },
+                "method": "post",
+                "path": "/@{encodeURIComponent('expense-outcomes')}/messages",
+                "body": {
+                  "ContentData": "@{base64(string(body('Parse_expense')))}",
+                  "Properties": { "outcome": "pending" }
+                }
+              },
+              "runAfter": {}
+            },
+
+            "_comment_human_interaction": {
+              "type": "Compose",
+              "inputs": "Logic Apps has no built-in durable-timer/wait-for-external-event primitive like Durable Functions. This workflow simulates the Human Interaction pattern with a bounded polling loop: it checks a 'manager-decisions' Service Bus subscription (filtered on the expense's correlation ID) every N seconds, up to a max iteration count that represents the timeout window. This trades exactness (Durable Functions timers are precise) for something Logic Apps can express natively without custom code.",
+              "runAfter": { "Send_to_pending_topic": ["Succeeded"] }
+            },
+
+            "Poll_for_manager_decision": {
+              "type": "Until",
+              "expression": "@or(equals(variables('decisionReceived'), true), greaterOrEquals(variables('pollCount'), 6))",
+              "limit": { "count": 60, "timeout": "PT30M" },
+              "actions": {
+                "Delay": {
+                  "type": "Wait",
+                  "inputs": { "interval": { "count": 20, "unit": "Second" } },
+                  "runAfter": {}
+                },
+                "Check_manager_subscription": {
+                  "type": "ApiConnection",
+                  "inputs": {
+                    "host": { "connection": { "name": "@parameters('$connections')['servicebus']['connectionId']" } },
+                    "method": "get",
+                    "path": "/@{encodeURIComponent('expense-outcomes/subscriptions/manager-decisions')}/messages/head/peek"
+                  },
+                  "runAfter": { "Delay": ["Succeeded"] }
+                },
+                "Increment_poll_count": {
+                  "type": "IncrementVariable",
+                  "inputs": { "name": "pollCount", "value": 1 },
+                  "runAfter": { "Check_manager_subscription": ["Succeeded", "Failed"] }
+                }
+              },
+              "runAfter": { "_comment_human_interaction": ["Succeeded"] }
+            },
+
+            "Condition_decision_or_timeout": {
+              "type": "If",
+              "expression": { "and": [{ "equals": ["@variables('decisionReceived')", true] }] },
+              "actions": {
+                "Set_outcome_from_manager": {
+                  "type": "SetVariable",
+                  "inputs": { "name": "finalOutcome", "value": "@variables('managerDecision')" }
+                }
+              },
+              "else": {
+                "actions": {
+                  "Set_outcome_escalated": {
+                    "type": "SetVariable",
+                    "inputs": { "name": "finalOutcome", "value": "escalated" }
+                  }
+                }
+              },
+              "runAfter": { "Poll_for_manager_decision": ["Succeeded", "TimedOut"] }
+            }
+          },
+          "else": {
+            "actions": {
+              "Set_outcome_auto_approved": {
+                "type": "SetVariable",
+                "inputs": { "name": "finalOutcome", "value": "approved" }
+              }
+            }
+          },
+          "runAfter": {}
+        },
+
+        "Publish_final_outcome": {
+          "type": "ApiConnection",
+          "inputs": {
+            "host": { "connection": { "name": "@parameters('$connections')['servicebus']['connectionId']" } },
+            "method": "post",
+            "path": "/@{encodeURIComponent('expense-outcomes')}/messages",
+            "body": {
+              "ContentData": "@{base64(string(body('Parse_expense')))}",
+              "Properties": { "outcome": "@variables('finalOutcome')" }
+            }
+          },
+          "runAfter": { "Condition_requires_approval": ["Succeeded"] }
+        },
+
+        "Send_employee_email": {
+          "type": "ApiConnection",
+          "inputs": {
+            "host": { "connection": { "name": "@parameters('$connections')['office365']['connectionId']" } },
+            "method": "post",
+            "path": "/v2/Mail",
+            "body": {
+              "To": "@{body('Parse_expense')?['employee_email']}",
+              "Subject": "Your expense request was @{variables('finalOutcome')}",
+              "Body": "<p>Hi @{body('Parse_expense')?['employee_name']},</p><p>Your expense of $@{body('Parse_expense')?['amount']} for @{body('Parse_expense')?['category']} was <b>@{variables('finalOutcome')}</b>.</p>"
+            }
+          },
+          "runAfter": { "Publish_final_outcome": ["Succeeded"] }
+        }
+      },
+      "else": {
+        "actions": {
+          "Send_validation_error_email": {
+            "type": "ApiConnection",
+            "inputs": {
+              "host": { "connection": { "name": "@parameters('$connections')['office365']['connectionId']" } },
+              "method": "post",
+              "path": "/v2/Mail",
+              "body": {
+                "To": "@{body('Parse_expense')?['employee_email']}",
+                "Subject": "Your expense request could not be processed",
+                "Body": "<p>Reason: @{body('Call_validation_function')?['reason']}</p>"
+              }
+            }
+          }
+        }
+      },
+      "runAfter": { "Call_validation_function": ["Succeeded"] }
+    }
+  },
+  "outputs": {}
+}

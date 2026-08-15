@@ -1,0 +1,116 @@
+@baseUrl = https://cst8917-expense-durable.azurewebsites.net/api
+
+### =========================================================
+### Scenario 1: Valid expense under $100 -> Auto-approved
+### =========================================================
+POST {{baseUrl}}/expenses/submit
+Content-Type: application/json
+
+{
+  "employee_name": "Alice Tremblay",
+  "employee_email": "alice@example.com",
+  "amount": 45.00,
+  "category": "meals",
+  "description": "Team lunch",
+  "manager_email": "manager@example.com"
+}
+
+### Copy the "statusQueryGetUri" from the response above and GET it here to confirm status = "approved"
+# GET <statusQueryGetUri from response>
+
+
+### =========================================================
+### Scenario 2: Valid expense >= $100, manager APPROVES
+### =========================================================
+POST {{baseUrl}}/expenses/submit
+Content-Type: application/json
+
+{
+  "employee_name": "Bob Nguyen",
+  "employee_email": "bob@example.com",
+  "amount": 350.00,
+  "category": "equipment",
+  "description": "Replacement laptop charger",
+  "manager_email": "manager@example.com"
+}
+
+### Grab the instanceId from the previous response's statusQueryGetUri, then send an approval within the timeout window
+POST {{baseUrl}}/expenses/a64dd13fec8d4165a669beb65c8272be/decision
+Content-Type: application/json
+
+{
+  "decision": "approved"
+}
+
+
+### =========================================================
+### Scenario 3: Valid expense >= $100, manager REJECTS
+### =========================================================
+POST {{baseUrl}}/expenses/submit
+Content-Type: application/json
+
+{
+  "employee_name": "Chen Wei",
+  "employee_email": "chen@example.com",
+  "amount": 899.99,
+  "category": "software",
+  "description": "Annual IDE license",
+  "manager_email": "manager@example.com"
+}
+
+### Send rejection using the instanceId returned above
+POST {{baseUrl}}/expenses/2de98d0954e04fc5bcd5a812bc7495f6/decision
+Content-Type: application/json
+
+{
+  "decision": "rejected"
+}
+
+
+### =========================================================
+### Scenario 4: Valid expense >= $100, NO manager response -> Escalated
+### =========================================================
+POST {{baseUrl}}/expenses/submit
+Content-Type: application/json
+
+{
+  "employee_name": "Dana Okafor",
+  "employee_email": "dana@example.com",
+  "amount": 500.00,
+  "category": "travel",
+  "description": "Conference airfare",
+  "manager_email": "manager@example.com"
+}
+
+### Do NOT call the /decision endpoint. Wait TIMEOUT_MINUTES (default 2 min in code), then GET status -> should read "escalated"
+# GET <statusQueryGetUri from response>
+
+
+### =========================================================
+### Scenario 5: Missing required fields -> Validation error
+### =========================================================
+POST {{baseUrl}}/expenses/submit
+Content-Type: application/json
+
+{
+  "employee_name": "Eve Martin",
+  "amount": 120.00,
+  "category": "travel",
+  "description": "Missing email fields"
+}
+
+
+### =========================================================
+### Scenario 6: Invalid category -> Validation error
+### =========================================================
+POST {{baseUrl}}/expenses/submit
+Content-Type: application/json
+
+{
+  "employee_name": "Frank Lee",
+  "employee_email": "frank@example.com",
+  "amount": 60.00,
+  "category": "entertainment",
+  "description": "Concert tickets",
+  "manager_email": "manager@example.com"
+}
