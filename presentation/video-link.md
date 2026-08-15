@@ -1,4 +1,3 @@
 # Presentation Video
 
-YouTube (unlisted): [PASTE LINK HERE AFTER UPLOADING]
-Duration: [X min]
+YouTube: (https://youtu.be/WoP9fXdNc9M)
