@@ -1,14 +1,9 @@
 # CST8917 — Assignment 2: Dual Implementation of an Expense Approval Workflow
 
-**Name:** [YOUR NAME]
-**Student Number:** [YOUR STUDENT #]
+**Name:** Faiza Boudehane
 **Course:** CST8917 — Serverless Applications
 **Project:** Compare & Contrast — Durable Functions vs. Logic Apps + Service Bus
-**Date:** [DATE]
-
-> ⚠️ Fill in the bracketed placeholders above and throughout, and replace the
-> comparison text below with your own observations once you've actually run both
-> versions — see the note at the end of this file.
+**Date:** 2026/08/14
 
 ---
 
